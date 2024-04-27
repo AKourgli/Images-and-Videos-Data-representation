@@ -1,116 +1,137 @@
 # -*- coding: utf-8 -*-
-
-import cv2
+"""
+Created on Fri Mar  8 17:29:18 2024
+https://www.bogotobogo.com/python/OpenCV_Python/python_opencv3_mean_shift_tracking_segmentation.php
+"""
 import numpy as np
+import cv2 as cv
+import time
 import matplotlib.pyplot as plt
-from skimage import data
-from skimage.filters import threshold_multiotsu
+
+roi = cv.imread('Image1.png'); roi_rgb=cv.cvtColor(roi, cv.COLOR_BGR2RGB);
+target = cv.imread('Image2.png'); target_rgb=cv.cvtColor(target, cv.COLOR_BGR2RGB);
 
 
-plt.close('all'); 
+roi_hsv = cv.cvtColor(roi,cv.COLOR_BGR2HSV)
+x=y=200; h=w=100; roi_hsv = roi_hsv[y:y+h,x:x+w,:]
+target_hsv  = cv.cvtColor(target,cv.COLOR_BGR2HSV)
+
+# roihist = cv.calcHist([roi_hsv],[0], None, [180], [0, 180] )
+# cv.normalize(roihist,roihist,0,255,cv.NORM_MINMAX)
+# dst = cv.calcBackProject([target_hsv],[0],roihist,[0,180],1)
+
+# # calculating object histogram
+roihist = cv.calcHist([roi_hsv],[0, 1], None, [180, 256], [0, 180, 0, 256] )
+
+# normalize histogram and apply backprojection
+cv.normalize(roihist,roihist,0,255,cv.NORM_MINMAX)
+
+# Back Projection is a way of recording how well the pixels of a given image fit the distribution of pixels in a histogram model.
+# calculate the histogram model of a feature and then use it to find this feature in an image.
+dst = cv.calcBackProject([target_hsv],[0,1],roihist,[0,180,0,256],1)
+
+# Now convolute with circular disc
+# disc = cv.getStructuringElement(cv.MORPH_ELLIPSE,(5,5))
+# cv.filter2D(dst,-1,disc,dst)
+
+rec = cv.rectangle(roi_rgb, (x,y), (x+w,y+h), 255,2)
+
+plt.figure(1)
+plt.subplot(221); plt.imshow(roi_rgb); plt.axis('off')
+plt.subplot(222); plt.imshow(target_rgb); plt.axis('off')
+plt.subplot(223); plt.stem(roihist); 
+plt.subplot(224); plt.imshow(dst,cmap='gray'); plt.axis('off')
 
 
-#Load the image
-A = cv2.imread('fge2.jpg')
-L,C,D = np.shape(A)
-A_rgb = cv2.cvtColor(A, cv2.COLOR_BGR2RGB); A_gray = cv2.cvtColor(A, cv2.COLOR_BGR2GRAY)
+"Tracking using meanshift"
 
-k11 = np.array([[-1, 0, 1], [-2, 0, 2],  [-1, 0, 1]])/4; A_k11= cv2.filter2D(src=A_gray, ddepth=5, kernel=k11); 
-k12 = np.array([[-1, -2, -1], [0, 0, 0],  [1, 2, 1]])/4; A_k12= cv2.filter2D(src=A_gray, ddepth=5, kernel=k12); 
-A_Sobel = np.sqrt(A_k11**2+A_k12**2); 
-A_Sobel_Seuil=np.where(A_Sobel> 50, 255, 0);
+cap = cv.VideoCapture('traffic.mp4')
 
+# take first frame of the video
+ret,frame = cap.read()
 
-h = cv2.calcHist([A_gray],[0],None,[256],[0,255])
-#thresholds = threshold_multiotsu(A_rgb)
-thresholds = np.array([0,30,100,160,210,255])
-A_reg1 = np.digitize(A_gray, bins=thresholds,right=True)
+# setup initial location of window
+x, y, w, h = 300, 200, 100, 50 # simply hardcoded the values
+track_window = (x, y, w, h)
 
-plt.figure(1)   
-plt.subplot(231); plt.imshow(A_gray,cmap='gray'); plt.title('RGB')
-plt.subplot(232); plt.imshow(A_Sobel_Seuil,cmap='gray'); plt.title('Segmentation contours')
-plt.subplot(233); plt.plot(h)
-plt.subplot(234); plt.imshow(A_reg1,cmap='hsv'); plt.title('Segmentation régions par quantification')
+# set up the ROI for tracking
+roi = frame[y:y+h, x:x+w]
+hsv_roi =  cv.cvtColor(roi, cv.COLOR_BGR2HSV)
+mask = cv.inRange(hsv_roi, np.array((0., 60.,32.)), np.array((180.,255.,255.)))
+roi_hist = cv.calcHist([hsv_roi],[0],mask,[180],[0,180])
+cv.normalize(roi_hist,roi_hist,0,255,cv.NORM_MINMAX)
 
-A_HSV = cv2.cvtColor(A_rgb, cv2.COLOR_RGB2HSV); 
-plt.subplot(235); plt.imshow(A_HSV[:,:,0],cmap='hsv'); plt.title('Image HSV')
+# Setup the termination criteria, either 10 iteration or move by at least 1 pt
+term_crit = ( cv.TERM_CRITERIA_EPS | cv.TERM_CRITERIA_COUNT, 10, 1 )
 
+while(1):
+    ret, frame = cap.read()
 
-# from matplotlib import colors
-# B = A_rgb
-# r, g, b = cv2.split(B)
-# fig = plt.figure(2)
-# axis = fig.add_subplot(1, 1, 1, projection="3d")
-# pixel_colors = B.reshape((np.shape(B)[0]*np.shape(B)[1], 3))
-# norm = colors.Normalize(vmin=-1.,vmax=1.)
-# norm.autoscale(pixel_colors)
-# pixel_colors = norm(pixel_colors).tolist()
-# axis.scatter(r.flatten(), g.flatten(), b.flatten(), facecolors=pixel_colors, marker=".")
-# axis.set_xlabel("Red");axis.set_ylabel("Green"); axis.set_zlabel("Blue")
-# plt.show()
+    if ret == True:
+        hsv = cv.cvtColor(frame, cv.COLOR_BGR2HSV)
+        dst = cv.calcBackProject([hsv],[0],roi_hist,[0,180],1)
 
-'K means'
-AV = A_rgb.reshape((-1,3)); AV = np.float32(AV)
+        # apply meanshift to get the new location
+        ret, track_window = cv.meanShift(dst, track_window, term_crit)
 
-# define criteria, number of clusters(K) and apply kmeans()
-criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 10, 1.0)
-K = 8
-compac,label,center=cv2.kmeans(AV,K,None,criteria,10,cv2.KMEANS_RANDOM_CENTERS)
+        # Draw it on image
+        x,y,w,h = track_window
+        img2 = cv.rectangle(frame, (x,y), (x+w,y+h), 255,2)
+        time.sleep(1/4)   
+        cv.imshow('Tracking using meanshift',img2)
 
-# Now convert back into uint8, and make original image
-center=np.round(center); center = np.uint8(center)
-AV_seg = center[label.flatten()]
-A_Seg = AV_seg.reshape((A_rgb.shape))
+        if cv.waitKey(1) == ord('q'):    break
 
-plt.figure(3)
-plt.subplot(221); plt.imshow(A_rgb,); plt.title('RGB')
-plt.subplot(222); plt.imshow(A_Seg);  plt.title('Image segmentée par Kmeans K=8')
+    else:
+        break
 
-# A_HSV = cv2.cvtColor(A_rgb, cv2.COLOR_RGB2HSV); A_HSV[:,:,2] = cv2.bilateralFilter(A_HSV[:,:,2], 25, 75, 75); B_rgb = cv2.cvtColor(A_HSV, cv2.COLOR_HSV2RGB)
-# AV = B_rgb.reshape((-1,3)); AV = np.float32(AV)
-# compac,label,center=cv2.kmeans(AV,K,None,criteria,10,cv2.KMEANS_RANDOM_CENTERS)
-# center=np.round(center); center = np.uint8(center)
-# AV_seg = center[label.flatten()]
-# A_Seg = AV_seg.reshape((A_rgb.shape))
-# plt.subplot(223); plt.imshow(A_Seg); plt.title('Filtée puis segmentée')
+"Tracking using camshift"
 
+cap = cv.VideoCapture('traffic.mp4')
+# take first frame of the video
+ret,frame = cap.read()
 
-# K = 4
-# ret,label,center=cv2.kmeans(AV,K,None,criteria,10,cv2.KMEANS_RANDOM_CENTERS)
-# center=np.round(center); center = np.uint8(center)
-# res = center[label.flatten()]
-# A_Seg4 = res.reshape((A_rgb.shape))
-# K = 2
-# ret,label,center=cv2.kmeans(AV,K,None,criteria,10,cv2.KMEANS_RANDOM_CENTERS)
-# center=np.round(center); center = np.uint8(center)
-# res = center[label.flatten()]
-# A_Seg2 = res.reshape((A_rgb.shape))
-# plt.subplot(223); plt.imshow(A_Seg2);  plt.title('Image segmentée par Kmeans K=2')
-# plt.subplot(224); plt.imshow(A_Seg4);  plt.title('Image segmentée par Kmeans K=4')
+# setup initial location of window
+x, y, w, h = 300, 200, 100, 50 # simply hardcoded the values
+track_window = (x, y, w, h)
 
+# set up the ROI for tracking
+roi = frame[y:y+h, x:x+w]
+hsv_roi =  cv.cvtColor(roi, cv.COLOR_BGR2HSV)
+mask = cv.inRange(hsv_roi, np.array((0., 60.,32.)), np.array((180.,255.,255.)))
+roi_hist = cv.calcHist([hsv_roi],[0],mask,[180],[0,180])
+cv.normalize(roi_hist,roi_hist,0,255,cv.NORM_MINMAX)
 
-'''
-Input parameters
-samples : It should be of np.float32 data type, and each feature should be put in a single column.
-nclusters(K) : Number of clusters required at end
-criteria : It is the iteration termination criteria. When this criteria is satisfied, algorithm iteration stops. Actually, it should be a tuple of 3 parameters. They are `( type, max_iter, epsilon )`:
-type of termination criteria. It has 3 flags as below:
-cv.TERM_CRITERIA_EPS - stop the algorithm iteration if specified accuracy, epsilon, is reached.
-cv.TERM_CRITERIA_MAX_ITER - stop the algorithm after the specified number of iterations, max_iter.
-cv.TERM_CRITERIA_EPS + cv.TERM_CRITERIA_MAX_ITER - stop the iteration when any of the above condition is met.
-max_iter - An integer specifying maximum number of iterations.
-epsilon - Required accuracy
-attempts : Flag to specify the number of times the algorithm is executed using different initial labellings. The algorithm returns the labels that yield the best compactness. This compactness is returned as output.
-flags : This flag is used to specify how initial centers are taken. Normally two flags are used for this : cv.KMEANS_PP_CENTERS and cv.KMEANS_RANDOM_CENTERS.
-Output parameters
+# Setup the termination criteria, either 10 iteration or move by at least 1 pt
+term_crit = ( cv.TERM_CRITERIA_EPS | cv.TERM_CRITERIA_COUNT, 10, 1 )
 
-compactness : It is the sum of squared distance from each point to their corresponding centers.
-labels : This is the label array (same as 'code' in previous article) where each element marked '0', '1'.....
-centers : This is array of centers of clusters.
-'''
-# A_reg1 = 255*np.ones((L,C), np.uint8);
-# A_reg1=np.where(A_gray<= 30, 0, A_reg1);
-# A_reg1=np.where((A_gray>30)& (A_gray<=100), 60, A_reg1);
-# A_reg1=np.where((A_gray>100)& (A_gray<=160), 120, A_reg1);
-# A_reg1=np.where((A_gray>160)& (A_gray<=210), 180, A_reg1);
-# A_reg1=np.where((A_gray>210)& (A_gray<250), 240, A_reg1);
+while(1):
+    ret, frame = cap.read()
+
+    if ret == True:
+        hsv = cv.cvtColor(frame, cv.COLOR_BGR2HSV)
+        dst = cv.calcBackProject([hsv],[0],roi_hist,[0,180],1)
+
+        # apply camshift to get the new location
+        ret, track_window = cv.CamShift(dst, track_window, term_crit)
+
+        # Draw it on image
+        pts = cv.boxPoints(ret)
+        pts = np.int0(pts)
+        img2 = cv.polylines(frame,[pts],True, 255,2)
+        time.sleep(1/4)  
+        cv.imshow('Tracking using camshift',img2)
+        if cv.waitKey(1) == ord('q'):    break
+
+    else:
+        break
+
+''' https://docs.opencv.org/3.4.15/da/d7f/tutorial_back_projection.html
+In terms of statistics, the values stored in BackProjection represent the probability
+ that a pixel in Test Image belongs to the same area, based on the model histogram that we use.
+ For instance in our Test image, the brighter areas are more probable to be our tracked area 
+ (as they actually are), whereas the darker areas have less probability.'''
+
+roihist = cv.calcHist([roi_hsv],[0], None, [180], [0, 180] )
+cv.normalize(roihist,roihist,0,255,cv.NORM_MINMAX)
+dst = cv.calcBackProject([target_hsv],[0],roihist,[0,180],1)
