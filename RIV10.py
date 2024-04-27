@@ -46,7 +46,7 @@ Created on Thu Apr 18 18:35:44 2024
 # cv.destroyAllWindows()
 # https://medium.com/@itberrios6/introduction-to-motion-detection-part-1-e031b0bb9bb2
 #%%
-
+#https://nanonets.com/blog/optical-flow/
 # import cv2 as cv
 # import numpy as np
 
@@ -78,7 +78,7 @@ Created on Thu Apr 18 18:35:44 2024
 # cv.destroyAllWindows()
 
 #%%
-
+# https://nanonets.com/blog/optical-flow/
 import cv2 as cv
 import numpy as np
 
